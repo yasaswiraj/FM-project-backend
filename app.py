@@ -18,6 +18,9 @@ tickers = [
     # Add more tickers as needed...
 ]
 
+# In-memory storage for preferences
+user_preferences = {}
+
 @app.route('/')
 def home():
     return "Welcome to the Stock Recommendation API!"
@@ -73,6 +76,23 @@ def recommend():
         return jsonify({"error": f"KeyError: {e}"}), 400
     except Exception as e:
         print(f"Exception: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/portfolio-preference', methods=['POST'])
+def portfolio_preference():
+    try:
+        data = request.json
+        user_preferences["diversify"] = data.get("diversify", True)
+        return jsonify({"message": "Preference saved successfully", "preference": user_preferences["diversify"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/get-preference', methods=['GET'])
+def get_preference():
+    try:
+        diversify = user_preferences.get("diversify", True)  # Default to True
+        return jsonify({"preference": diversify})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
