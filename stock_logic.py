@@ -10,48 +10,37 @@ def get_risk_level(answers):
     risk_scores = []
 
     # Age
-    if answers['age'] == "20-40":
-        risk_scores.append("High")
-    elif answers['age'] == "41-60":
-        risk_scores.append("Medium")
-    else:
-        risk_scores.append("Low")
+    risk_scores.append(
+        "High" if answers["age"] == "20-40" else "Medium" if answers["age"] == "41-60" else "Low"
+    )
 
     # Income
-    if answers['income'] == "5000-15000 USD":
-        risk_scores.append("Low")
-    elif answers['income'] == "15000-50000 USD":
-        risk_scores.append("Medium")
-    else:
-        risk_scores.append("High")
+    risk_scores.append(
+        "Low" if answers["income"] == "5000-15000 USD"
+        else "Medium" if answers["income"] == "15000-50000 USD"
+        else "High"
+    )
 
     # Investment Horizon
-    if answers['horizon'] == "0-1 year":
-        risk_scores.append("Low")
-    elif answers['horizon'] == "1-5 years":
-        risk_scores.append("Medium")
-    else:
-        risk_scores.append("High")
+    risk_scores.append(
+        "Low" if answers["horizon"] == "0-1 year"
+        else "Medium" if answers["horizon"] == "1-5 years"
+        else "High"
+    )
 
     # Investment Amount
-    if answers['amount'] == "0-10K USD":
-        risk_scores.append("Low")
-    elif answers['amount'] == "10K-50K USD":
-        risk_scores.append("Medium")
-    else:
-        risk_scores.append("High")
+    risk_scores.append(
+        "Low" if answers["amount"] == "0-10K USD"
+        else "Medium" if answers["amount"] == "10K-50K USD"
+        else "High"
+    )
 
     # Determine overall risk level
     high = risk_scores.count("High")
     medium = risk_scores.count("Medium")
     low = risk_scores.count("Low")
 
-    if high > medium and high > low:
-        return "High"
-    elif medium > low:
-        return "Medium"
-    else:
-        return "Low"
+    return "High" if high > medium and high > low else "Medium" if medium > low else "Low"
 
 
 # Buy Rating Evaluation
@@ -60,35 +49,25 @@ def evaluate_buy_rating(row, sector_summary):
     Evaluates whether a stock is a 'Good' or 'Bad' buy based on sector averages.
     """
     try:
-        # Get the sector average values for the stock's sector
         sector_avg = sector_summary.loc[row["Sector"]]
     except KeyError:
-        # If sector is missing in sector summary, return 'Bad'
         return "Bad"
 
     good_count = 0
 
-    # P/E Ratio: Good if the company's P/E is less than 110% of the sector average
-    if row["P/E Ratio"] and row["P/E Ratio"] < 1.1 * sector_avg["P/E Ratio"]:
-        good_count += 1
+    # Evaluate metrics
+    metrics = [
+        ("P/E Ratio", lambda x, avg: x < 1.1 * avg),
+        ("P/B Ratio", lambda x, avg: x < 1.1 * avg),
+        ("Debt-to-Equity", lambda x, avg: x < 1.1 * avg),
+        ("Std Deviation", lambda x, avg: x < avg),
+        ("CAGR", lambda x, avg: x > avg),
+    ]
 
-    # P/B Ratio: Good if the company's P/B is less than 110% of the sector average
-    if row["P/B Ratio"] and row["P/B Ratio"] < 1.1 * sector_avg["P/B Ratio"]:
-        good_count += 1
+    for metric, condition in metrics:
+        if pd.notna(row[metric]) and condition(row[metric], sector_avg[metric]):
+            good_count += 1
 
-    # Debt-to-Equity: Good if the company's debt-to-equity is less than 110% of the sector average
-    if row["Debt-to-Equity"] and row["Debt-to-Equity"] < 1.1 * sector_avg["Debt-to-Equity"]:
-        good_count += 1
-
-    # Standard Deviation: Good if the company's standard deviation is below the sector average
-    if row["Std Deviation"] and row["Std Deviation"] < sector_avg["Std Deviation"]:
-        good_count += 1
-
-    # CAGR: Good if the company's CAGR is above the sector average
-    if row["CAGR"] and row["CAGR"] > sector_avg["CAGR"]:
-        good_count += 1
-
-    # If 3 or more metrics are good, the stock is rated 'Good'; otherwise, 'Bad'
     return "Good" if good_count >= 3 else "Bad"
 
 
@@ -106,13 +85,14 @@ def fetch_stock_data(tickers):
             if hist.empty or "Close" not in hist.columns:
                 continue
 
+            # Calculate CAGR and Standard Deviation
             start_price = hist["Close"].iloc[0]
             end_price = hist["Close"].iloc[-1]
             cagr = ((end_price / start_price) ** (1 / 2)) - 1
-
             hist["Daily Returns"] = hist["Close"].pct_change().dropna()
             std_dev = hist["Daily Returns"].std() * np.sqrt(252)
 
+            # Fetch fundamental data
             info = stock.info
             data.append({
                 "Ticker": ticker,
@@ -126,7 +106,6 @@ def fetch_stock_data(tickers):
             })
         except Exception as e:
             print(f"Error fetching data for {ticker}: {e}")
-            continue
 
     # Convert collected data into a DataFrame
     df = pd.DataFrame(data)
@@ -150,17 +129,58 @@ def recommend_stocks(risk_level, diversify, df):
     """
     Recommend stocks based on the user's risk level and diversification preference.
     """
-    good_stocks = df[df["Buy Rating"] == "Good"]
-    good_stocks = good_stocks.sort_values(by="CAGR", ascending=False)
+    # Filter stocks with a "Good" buy rating
+    good_stocks = df[df["Buy Rating"] == "Good"].sort_values(by="CAGR", ascending=False)
 
+    # Risk filtering
     if risk_level == "Low":
         recommended_stocks = good_stocks[good_stocks["Std Deviation"] <= 0.20]
     elif risk_level == "Medium":
         recommended_stocks = good_stocks[good_stocks["Std Deviation"] <= 0.28]
-    else:
+    else:  # High risk
         recommended_stocks = good_stocks
 
     if diversify:
-        return recommended_stocks.groupby("Sector").head(1).head(5)
+        # Group by Sector and pick the top stock from each sector
+        diversified_stocks = recommended_stocks.groupby("Sector").head(1)
+
+        # If there aren't enough diverse stocks, fill with the next best options
+        if len(diversified_stocks) < 5:
+            remaining_stocks = recommended_stocks[
+                ~recommended_stocks.index.isin(diversified_stocks.index)
+            ]
+            diversified_stocks = pd.concat([diversified_stocks, remaining_stocks]).head(5)
+
+        return diversified_stocks
     else:
+        # Simply return the top 5 stocks
         return recommended_stocks.head(5)
+
+
+# Portfolio Metrics
+def calculate_portfolio_metrics(recommended_stocks):
+    """
+    Calculate the expected return and standard deviation of the recommended portfolio.
+    """
+    if recommended_stocks.empty:
+        return None, None
+
+    # Extract CAGR and Std Deviation
+    cagr = recommended_stocks["CAGR"].values
+    std_dev = recommended_stocks["Std Deviation"].values
+
+    # Equal weights for each stock
+    n_stocks = len(cagr)
+    weights = np.full(n_stocks, 1 / n_stocks)
+
+    # Placeholder correlation matrix (can be replaced with actual correlations)
+    correlation_matrix = np.eye(n_stocks) + 0.25 * (np.ones((n_stocks, n_stocks)) - np.eye(n_stocks))
+
+    # Portfolio expected return
+    expected_return = np.dot(weights, cagr)
+
+    # Portfolio variance and standard deviation
+    portfolio_variance = np.dot(weights, np.dot(correlation_matrix * np.outer(std_dev, std_dev), weights))
+    portfolio_std_dev = np.sqrt(portfolio_variance)
+
+    return expected_return, portfolio_std_dev

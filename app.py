@@ -48,7 +48,6 @@ def fetch():
 @app.route('/recommend', methods=['POST'])
 def recommend():
     try:
-        # Receive input data
         data = request.json
         risk_level = data['risk_level']
         diversify = data['diversify']
@@ -66,16 +65,24 @@ def recommend():
 
         # Get recommendations
         recommendations = recommend_stocks(risk_level, diversify, stock_data)
-        print("Recommendations:")
-        print(recommendations)  # Debugging print
 
-        # Return recommendations as JSON
-        return recommendations.to_json(orient='records')
-    except KeyError as e:
-        print(f"KeyError: {e}")
-        return jsonify({"error": f"KeyError: {e}"}), 400
+        # Calculate portfolio metrics if there are recommendations
+        if not recommendations.empty:
+            from stock_logic import calculate_portfolio_metrics
+            expected_return, portfolio_std_dev = calculate_portfolio_metrics(recommendations)
+        else:
+            expected_return, portfolio_std_dev = None, None
+
+        # Convert recommendations to JSON
+        recommendations_json = recommendations.to_dict(orient="records")
+
+        # Return recommendations and metrics
+        return jsonify({
+            "recommendations": recommendations_json,
+            "expected_return": expected_return,
+            "portfolio_std_dev": portfolio_std_dev
+        })
     except Exception as e:
-        print(f"Exception: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/portfolio-preference', methods=['POST'])
