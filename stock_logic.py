@@ -1,7 +1,11 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-
+from prophet import Prophet
+import matplotlib.pyplot as plt
+import os
+import matplotlib
+matplotlib.use('Agg')
 # Risk Assessment Logic
 def get_risk_level(answers):
     """
@@ -184,3 +188,58 @@ def calculate_portfolio_metrics(recommended_stocks):
     portfolio_std_dev = np.sqrt(portfolio_variance)
 
     return expected_return, portfolio_std_dev
+
+
+# Forecast and Plot Prices
+
+matplotlib.use('Agg')  # Use non-interactive backend
+from prophet import Prophet
+import matplotlib.pyplot as plt
+
+def forecast_and_plot(stock_ticker, price_data):
+    try:
+        # Prepare data
+        price_data = price_data.reset_index()
+        price_data['Date'] = price_data['Date'].dt.tz_localize(None)
+        price_data = price_data[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
+
+        # Initialize and fit model
+        model = Prophet()
+        model.fit(price_data)
+
+        # Future predictions
+        future = model.make_future_dataframe(periods=30)
+        forecast = model.predict(future)
+
+        # Plot and save
+        plt.figure(figsize=(12, 6))
+        plt.plot(price_data['ds'], price_data['y'], label='Historical Prices')
+        plt.plot(forecast['ds'], forecast['yhat'], label='Forecasted Prices', color='orange')
+        plt.fill_between(
+            forecast['ds'], forecast['yhat_lower'], forecast['yhat_upper'],
+            color='orange', alpha=0.2, label='Prediction Interval'
+        )
+        plt.title(f"Price Prediction for {stock_ticker}")
+        plt.xlabel("Date")
+        plt.ylabel("Price")
+        plt.legend()
+        plt.grid()
+        plt.savefig(f"{stock_ticker}_forecast.png")  # Save to file instead of showing
+        plt.close()  # Ensure proper resource cleanup
+    except Exception as e:
+        print(f"Error plotting forecast for {stock_ticker}: {e}")
+
+# Download Price Data for Recommended Stocks
+def download_price_data_for_recommended_stocks(recommended_stocks, period="2y"):
+    """
+    Download historical price data for the recommended stocks.
+    """
+    price_data_dict = {}
+    for _, row in recommended_stocks.iterrows():
+        ticker = row["Ticker"]
+        print(f"Downloading price data for {ticker}...")
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period=period)
+        if not hist.empty and "Close" in hist.columns:
+            price_data_dict[ticker] = hist
+    return price_data_dict

@@ -1,7 +1,15 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from stock_logic import get_risk_level, fetch_stock_data, recommend_stocks
+from stock_logic import (
+    get_risk_level,
+    fetch_stock_data,
+    recommend_stocks,
+    calculate_portfolio_metrics,
+    forecast_and_plot,
+    download_price_data_for_recommended_stocks,
+)
 import pandas as pd
+import os
 
 app = Flask(__name__)
 
@@ -15,11 +23,11 @@ tickers = [
     "XOM", "PFE", "VZ", "KO", "PEP", "ABT", "CRM", "NKE", "AVGO", "WFC",
     "T", "LLY", "ORCL", "MDT", "GE", "NEE", "CVX", "COST", "QCOM", "ABNB", "DUK", "NEE", 
     "SO", "EXC", "XEL", "AEP", "CAT", "HON", "MMM", "RTX", "UPS", "DE", "GE", "COP", "EOG", "SLB"
-    # Add more tickers as needed...
 ]
 
 # In-memory storage for preferences
 user_preferences = {}
+price_data_dict = {}
 
 @app.route('/')
 def home():
@@ -66,9 +74,12 @@ def recommend():
         # Get recommendations
         recommendations = recommend_stocks(risk_level, diversify, stock_data)
 
+        # Download price data for the recommended stocks
+        global price_data_dict
+        price_data_dict = download_price_data_for_recommended_stocks(recommendations)
+
         # Calculate portfolio metrics if there are recommendations
         if not recommendations.empty:
-            from stock_logic import calculate_portfolio_metrics
             expected_return, portfolio_std_dev = calculate_portfolio_metrics(recommendations)
         else:
             expected_return, portfolio_std_dev = None, None
@@ -101,6 +112,25 @@ def get_preference():
         return jsonify({"preference": diversify})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/forecast/<ticker>', methods=['GET'])
+def forecast(ticker):
+    try:
+        if ticker not in price_data_dict:
+            return jsonify({"error": f"No price data found for ticker {ticker}"}), 404
+
+        # Generate and save the forecast plot
+        file_path = f"{ticker}_forecast.png"
+        forecast_and_plot(ticker, price_data_dict[ticker], file_path)
+
+        # Send the file as a response
+        return send_file(file_path, mimetype="image/png", as_attachment=False)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # Cleanup: Remove the generated file after sending
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
 if __name__ == "__main__":
     app.run(debug=True)
