@@ -3,3 +3,6 @@ pandas
 numpy
 yfinance
 flask-cors
+prophet==1.1.5
+matplotlib>=3.7
+gunicorn
